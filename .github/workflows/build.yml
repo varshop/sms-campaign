@@ -5,86 +5,25 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  # ثبّتنا خط 3.41 لضمان بناء متكرر ومستقر. آخر تحديث (patch) من هذا الخط يُستخدم تلقائياً.
-  FLUTTER_VERSION: '3.41.x'
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
 
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
           cache: true
-
-      - name: Flutter version
-        run: flutter --version
-
-      # المستودع يحتوي: lib/ و pubspec.yaml و AndroidManifest.xml فقط.
-      # نولّد هيكل أندرويد الحديث (Gradle Kotlin DSL + Embedding v2) ثم نعيد ملفاتنا فوقه.
-      - name: Generate Android project
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/keep && mkdir -p /tmp/keep
-          cp -r lib /tmp/keep/lib
-          cp pubspec.yaml /tmp/keep/pubspec.yaml
-          cp android/app/src/main/AndroidManifest.xml /tmp/keep/AndroidManifest.xml
-
-          rm -rf android lib pubspec.yaml
-          flutter create --org com.example --project-name sms_campaign --platforms android .
-
-          rm -rf lib test analysis_options.yaml pubspec.yaml
-          cp -r /tmp/keep/lib lib
-          cp /tmp/keep/pubspec.yaml pubspec.yaml
-          cp /tmp/keep/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
-
-      # telephony_sms يتطلب minSdk 24 على الأقل
-      - name: Ensure minSdk >= 24 and limit Gradle memory
-        run: |
-          python3 - <<'PY'
-          import pathlib, re
-
-          kts = pathlib.Path('android/app/build.gradle.kts')
-          groovy = pathlib.Path('android/app/build.gradle')
-          if kts.exists():
-              s = kts.read_text()
-              s = re.sub(r'minSdk\s*=\s*flutter\.minSdkVersion',
-                         'minSdk = maxOf(flutter.minSdkVersion, 24)', s)
-              kts.write_text(s)
-          if groovy.exists():
-              s = groovy.read_text()
-              s = re.sub(r'minSdkVersion\s+flutter\.minSdkVersion',
-                         'minSdkVersion Math.max(flutter.minSdkVersion, 24)', s)
-              groovy.write_text(s)
-
-          props = pathlib.Path('android/gradle.properties')
-          lines = props.read_text().splitlines() if props.exists() else []
-          lines = [l for l in lines if not l.startswith('org.gradle.jvmargs=')]
-          lines.append('org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=1G -XX:+HeapDumpOnOutOfMemoryError')
-          props.write_text('\n'.join(lines) + '\n')
-          PY
-          grep -n "minSdk" android/app/build.gradle* || true
 
       - name: Install dependencies
         run: flutter pub get
@@ -97,5 +36,3 @@ jobs:
         with:
           name: sms-campaign-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
-          retention-days: 30
